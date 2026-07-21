@@ -14,18 +14,18 @@ def load_korean_pop():
 
 @st.cache_data
 def load_foreign_inout():
-    return pd.read_excel("국내 체류 외국인 신규 유입·유출 통계(2026년 6월).xlsx", 
+    return pd.read_excel("foreign_inout_202606.xlsx", 
                         sheet_name="국내 체류 외국인 신규 유입·유출 통계(2026년 6월)", header=None)
 
 @st.cache_data
 def load_foreign_visa():
-    df = pd.read_excel("5.2. 지역별 외국인(등록+거소) 현황(지역별, 자격별)(3월말).xlsx", 
+    df = pd.read_excel("foreign_visa_2026.xlsx", 
                       sheet_name="5.2", header=0)
     return df
 
 @st.cache_data
 def load_foreign_nationality():
-    df = pd.read_excel("5.1. 지역별 외국인(등록+거소) 현황(지역별, 국적별)(3월말).xlsx", 
+    df = pd.read_excel("foreign_nationality_2026.xlsx", 
                       sheet_name="sheet", header=0)
     return df
 
