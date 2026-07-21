@@ -9,14 +9,22 @@ st.title("🧬 인구 구조가 가장 비슷한 '쌍둥이동네' TOP5")
 
 @st.cache_data
 def load_data():
-    df = pd.read_excel("foreign_inout_202606.xlsx", 
-                       sheet_name="연령별인구현황", header=3)
-    
-    # 숫자 변환
-    for col in df.columns:
-        if col not in ['행정기관코드', '행정기관']:
-            df[col] = pd.to_numeric(df[col].astype(str).str.replace(',', ''), errors='coerce')
-    return df
+    try:
+        df = pd.read_excel("202606_202606_연령별인구현황_월간.xlsx", 
+                          sheet_name="연령별인구현황", 
+                          header=3)
+        # 숫자 변환
+        for col in df.columns:
+            if col not in ['행정기관코드', '행정기관']:
+                df[col] = pd.to_numeric(df[col].astype(str).str.replace(',', ''), errors='coerce')
+        st.success("✅ 한국인 인구 데이터 로드 성공")
+        return df
+    except FileNotFoundError:
+        st.error("❌ 파일을 찾을 수 없습니다: 202606_202606_연령별인구현황_월간.xlsx")
+        st.stop()
+    except Exception as e:
+        st.error(f"❌ 데이터 로드 오류: {e}")
+        st.stop()
 
 df = load_data()
 
@@ -36,7 +44,7 @@ else:
 
 selected = st.selectbox("기준 지역 선택", options)
 
-# 유사도 계산 (수동 코사인 유사도)
+# 유사도 계산
 idx = df[df['행정기관'] == selected].index[0]
 selected_vec = age_vectors[idx]
 
@@ -52,7 +60,7 @@ top5 = pd.DataFrame({
 st.subheader(f"**{selected}** 와 가장 비슷한 지역 TOP5")
 st.dataframe(top5.style.format({'유사도': '{:.4f}'}), use_container_width=True)
 
-# 비교 그래프
+# 그래프
 fig = go.Figure()
 fig.add_trace(go.Scatter(x=age_cols, y=age_vectors[idx], 
                         name=selected, line=dict(color='blue', width=4)))
@@ -71,5 +79,3 @@ fig.update_layout(
     hovermode="x unified"
 )
 st.plotly_chart(fig, use_container_width=True)
-
-st.caption("유사도 계산: 연령별 인구 분포 벡터 기반 코사인 유사도")
