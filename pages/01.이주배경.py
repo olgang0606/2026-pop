@@ -9,19 +9,24 @@ st.set_page_config(
 )
 
 
-# 인코딩 대응 데이터 로드 함수
-@st.cache_data
-def load_data(file_path):
-    if not os.path.exists(file_path):
+# 인코딩 대응 데이터 로드 함수 (파일 경로 또는 업로드된 파일 객체)
+def load_data(file_source):
+    if file_source is None:
         return None
 
-    # 여러 인코딩 방식을 순차적으로 시도하여 로드
     encodings = ["cp949", "euc-kr", "utf-8-sig", "utf-8"]
     df = None
 
     for enc in encodings:
         try:
-            df = pd.read_csv(file_path, encoding=enc)
+            if isinstance(file_source, str):
+                if not os.path.exists(file_source):
+                    continue
+                df = pd.read_csv(file_source, encoding=enc)
+            else:
+                # Streamlit UploadedFile 객체 처리
+                file_source.seek(0)
+                df = pd.read_csv(file_source, encoding=enc)
             break
         except Exception:
             continue
@@ -58,7 +63,7 @@ st.markdown(
     "원하는 **시도** 및 **시군구**를 선택하여 외국인 인구 구조를 꺾은선 그래프와 상세 데이터로 확인하세요."
 )
 
-# 파일명 매핑 (보유한 파일 구조에 맞춰 매핑)
+# 파일명 매핑
 FILES = {
     "국적별 인구 구조": "foreign_visa_2026.csv",
     "체류자격(비자)별 인구 구조": "foreign_nationality_2026.csv",
@@ -71,14 +76,23 @@ st.sidebar.header("🔍 분석 조건 선택")
 data_category = st.sidebar.radio(
     "분석 관점 선택", list(FILES.keys()), index=0
 )
-file_name = FILES[data_category]
+target_filename = FILES[data_category]
 
-# 데이터 불러오기
-df = load_data(file_name)
+# 파일 로드 시도 (로컬/서버 파일 우선, 없으면 업로드 파일 사용)
+df = load_data(target_filename)
 
 if df is None:
-    st.error(
-        f"❌ 데이터 파일 `{file_name}`을(를) 읽을 수 없습니다. 파일이 코드와 같은 폴더에 위치해 있는지 확인해 주세요."
+    st.sidebar.warning(f"⚠️ `{target_filename}` 파일을 찾을 수 없습니다.")
+    uploaded_file = st.sidebar.file_uploader(
+        f"`{target_filename}` 파일을 직접 업로드해 주세요", type=["csv"]
+    )
+    if uploaded_file is not None:
+        df = load_data(uploaded_file)
+
+if df is None:
+    st.info(
+        f"👈 왼쪽 사이드바에서 `{target_filename}` CSV 파일을 업로드하거나, "
+        f"GitHub 리포지토리에 파일이 올바르게 올라가 있는지 확인해 주세요."
     )
 else:
     # 2. 시/도 선택
@@ -107,7 +121,7 @@ else:
     ]
     selected_gender = st.sidebar.selectbox("성별 구분", gender_list)
 
-    # 5. 상위 항목 필터링 슬라이더
+    # 5. 상위 N개 슬라이더
     top_n = st.sidebar.slider(
         "표시할 상위 항목 수 (TOP N)",
         min_value=5,
@@ -126,7 +140,7 @@ else:
     if filtered_df.empty:
         st.warning("⚠️ 선택한 조건에 해당하는 데이터가 존재하지 않습니다.")
     else:
-        # 데이터 정렬 및 추출
+        # 수치 항목 정렬
         exclude_cols = ["시도", "시군구", "성별", "총합계"]
         metric_cols = [c for c in filtered_df.columns if c not in exclude_cols]
 
@@ -140,7 +154,7 @@ else:
 
         top_chart_df = chart_df.head(top_n)
 
-        # 주요 요약 지표
+        # 주요 지표 Card 표시
         total_pop = filtered_df["총합계"].values[0]
         st.markdown("---")
         col1, col2, col3 = st.columns(3)
@@ -157,7 +171,7 @@ else:
             f"📈 {selected_sido} {selected_sigungu} [{data_category}] TOP {top_n} 분포"
         )
 
-        # Plotly 인터랙티브 꺾은선 그래프
+        # Plotly 꺾은선 그래프 생성
         fig = go.Figure()
 
         fig.add_trace(
@@ -168,8 +182,8 @@ else:
                 name="인구수",
                 text=[f"{int(val):,}" for val in top_chart_df["인구수"]],
                 textposition="top center",
-                line=dict(color="#2b5c8f", width=3),
-                marker=dict(size=8, color="#e05d06"),
+                line=dict(color="#1f77b4", width=3),
+                marker=dict(size=8, color="#ff7f0e"),
                 hovertemplate="<b>%{x}</b><br>인구수: %{y:,}명<extra></extra>",
             )
         )
@@ -186,7 +200,7 @@ else:
 
         st.plotly_chart(fig, use_container_width=True)
 
-        # 상세 데이터 표
+        # 상세 데이터
         with st.expander("📋 상세 데이터표 보기"):
             st.dataframe(
                 top_chart_df.style.format({"인구수": "{:,.0f}"}),
