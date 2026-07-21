@@ -3,7 +3,6 @@ import pandas as pd
 import plotly.graph_objects as go
 from plotly.subplots import make_subplots
 from sklearn.metrics.pairwise import cosine_similarity
-import numpy as np
 
 st.set_page_config(page_title="쌍둥이동네 찾기", layout="wide")
 st.title("🧬 인구 구조가 가장 비슷한 '쌍둥이동네' TOP5")
@@ -19,15 +18,13 @@ def load_data():
 
 df = load_data()
 
-# 연령 벡터 준비
 age_cols = [c for c in df.columns if ('세' in str(c) or '100세 이상' in str(c)) 
             and not any(x in str(c) for x in ['.1','.2'])]
 
 age_vectors = df[age_cols].fillna(0).values
 regions = df['행정기관'].values
 
-# 검색
-search = st.text_input("🔍 지역 검색 (읍면동까지)", "")
+search = st.text_input("🔍 지역 검색 (읍면동 포함)", "")
 if search:
     options = df[df['행정기관'].str.contains(search, na=False)]['행정기관'].unique()
 else:
@@ -35,16 +32,12 @@ else:
 
 selected = st.selectbox("기준 지역 선택", options)
 
-# 유사도 계산
 idx = df[df['행정기관'] == selected].index[0]
 sim = cosine_similarity([age_vectors[idx]], age_vectors)[0]
 
-top5 = pd.DataFrame({
-    '지역': regions,
-    '유사도': sim
-}).sort_values('유사도', ascending=False)[1:6].reset_index(drop=True)
+top5 = pd.DataFrame({'지역': regions, '유사도': sim}).sort_values('유사도', ascending=False)[1:6]
 
-st.subheader(f"**{selected}** 과 가장 비슷한 지역 TOP5")
+st.subheader(f"**{selected}** 와 가장 비슷한 지역 TOP5")
 st.dataframe(top5.style.format({'유사도': '{:.4f}'}), use_container_width=True)
 
 # 그래프
@@ -57,5 +50,5 @@ for i, r in top5.iterrows():
     fig.add_trace(go.Scatter(x=age_cols, y=age_vectors[r_idx], name=r['지역'], 
                             line=dict(color=colors[i], dash='dash')))
 
-fig.update_layout(title="인구 구조 비교", xaxis_title="연령", yaxis_title="인구수", height=650, hovermode="x unified")
+fig.update_layout(title="인구 구조 비교", xaxis_title="연령", yaxis_title="인구수", height=700, hovermode="x unified")
 st.plotly_chart(fig, use_container_width=True)
