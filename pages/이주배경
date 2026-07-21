@@ -1,0 +1,130 @@
+import streamlit as st
+import pandas as pd
+import plotly.graph_objects as go
+from plotly.subplots import make_subplots
+
+st.set_page_config(page_title="2026년 6월 인구 · 다문화 대시보드", layout="wide")
+st.title("📊 2026년 6월 연령별 인구 + 다문화(외국인) 통계")
+
+# ==================== 데이터 로드 ====================
+@st.cache_data
+def load_population_data():
+    df = pd.read_excel("202606_202606_연령별인구현황_월간.xlsx", 
+                       sheet_name="연령별인구현황", 
+                       header=3)
+    for col in df.columns:
+        if col not in ['행정기관코드', '행정기관']:
+            df[col] = pd.to_numeric(df[col].astype(str).str.replace(',', ''), errors='coerce')
+    return df
+
+@st.cache_data
+def load_foreign_data():
+    df = pd.read_excel("국내 체류 외국인 신규 유입·유출 통계(2026년 6월).xlsx", 
+                       sheet_name="국내 체류 외국인 신규 유입·유출 통계(2026년 6월)", 
+                       header=None)
+    return df
+
+pop_df = load_population_data()
+foreign_df = load_foreign_data()
+
+# ==================== 탭 구성 ====================
+tab1, tab2 = st.tabs(["🏠 연령별 한국인 인구 구조", "🌍 다문화(외국인) 유입·유출"])
+
+# ====================== 탭 1: 연령별 인구 ======================
+with tab1:
+    st.header("연령별 인구 구조")
+    
+    # 지역 선택
+    search_term = st.text_input("🔍 지역 검색", "", key="pop_search")
+    if search_term:
+        options = pop_df[pop_df['행정기관'].str.contains(search_term, na=False)]['행정기관'].unique()
+    else:
+        options = sorted(pop_df['행정기관'].unique())
+    
+    selected_region = st.selectbox("분석할 지역 선택", options=options, key="pop_region")
+
+    region_row = pop_df[pop_df['행정기관'] == selected_region].iloc[0]
+
+    # 연령 데이터 준비
+    age_cols = [col for col in pop_df.columns if ('세' in str(col) or '100세 이상' in str(col)) 
+                and not any(x in str(col) for x in ['.1', '.2', 'Unnamed'])]
+    
+    ages = []
+    for col in age_cols:
+        if '100세 이상' in col:
+            ages.append(100)
+        else:
+            try:
+                ages.append(int(''.join(filter(str.isdigit, col))))
+            except:
+                ages.append(col)
+
+    total = [region_row[col] for col in age_cols]
+    male = [region_row.get(str(col)+'.1', 0) for col in age_cols]
+    female = [region_row.get(str(col)+'.2', 0) for col in age_cols]
+
+    # 그래프
+    fig = make_subplots()
+    fig.add_trace(go.Scatter(x=ages, y=total, mode='lines+markers', name='총 인구', line=dict(color='blue', width=3)))
+    fig.add_trace(go.Scatter(x=ages, y=male, mode='lines+markers', name='남성', line=dict(color='dodgerblue')))
+    fig.add_trace(go.Scatter(x=ages, y=female, mode='lines+markers', name='여성', line=dict(color='hotpink')))
+    
+    fig.update_layout(
+        title=f"{selected_region} 연령별 인구 구조",
+        xaxis_title="연령",
+        yaxis_title="인구수 (명)",
+        height=600,
+        hovermode="x unified"
+    )
+    st.plotly_chart(fig, use_container_width=True)
+
+    st.metric("총 인구수", f"{int(region_row['총 인구수']):,} 명")
+
+# ====================== 탭 2: 다문화(외국인) ======================
+with tab2:
+    st.header("다문화(외국인) 신규 유입·유출 통계 (2026년 6월)")
+    
+    # 지역 선택
+    foreign_search = st.text_input("🔍 지역 검색", "", key="foreign_search")
+    
+    # 데이터 정리 (필요한 시트에서 지역별 데이터 추출)
+    inflow = foreign_df.iloc[25:43, [0,5]].copy()  # 6월 신규 유입
+    inflow.columns = ['지역', '신규유입']
+    inflow = inflow.dropna()
+    
+    outflow = foreign_df.iloc[50:68, [0,5]].copy()  # 6월 유출
+    outflow.columns = ['지역', '유출']
+    outflow = outflow.dropna()
+    
+    net = foreign_df.iloc[74:92, [0,5]].copy()  # 순증감
+    net.columns = ['지역', '순증감']
+    net = net.dropna()
+
+    # 검색 적용
+    if foreign_search:
+        inflow = inflow[inflow['지역'].str.contains(foreign_search, na=False)]
+        outflow = outflow[outflow['지역'].str.contains(foreign_search, na=False)]
+        net = net[net['지역'].str.contains(foreign_search, na=False)]
+
+    selected_foreign = st.selectbox("지역 선택", options=net['지역'].unique(), key="foreign_region")
+
+    # 선택한 지역 데이터
+    in_val = inflow[inflow['지역'] == selected_foreign]['신규유입'].values
+    out_val = outflow[outflow['지역'] == selected_foreign]['유출'].values
+    net_val = net[net['지역'] == selected_foreign]['순증감'].values
+
+    col1, col2, col3 = st.columns(3)
+    col1.metric("신규 유입", f"{int(in_val[0]) if len(in_val)>0 else 0:,} 명")
+    col2.metric("유출", f"{int(out_val[0]) if len(out_val)>0 else 0:,} 명")
+    col3.metric("순증감", f"{int(net_val[0]) if len(net_val)>0 else 0:,} 명", 
+                delta=f"{int(net_val[0]) if len(net_val)>0 else 0:,}")
+
+    # 바 차트
+    fig2 = go.Figure()
+    fig2.add_trace(go.Bar(x=['신규 유입', '유출'], y=[int(in_val[0]) if len(in_val)>0 else 0, 
+                                                     int(out_val[0]) if len(out_val)>0 else 0],
+                         name='인원', marker_color=['green', 'red']))
+    fig2.update_layout(title=f"{selected_foreign} 외국인 유입·유출 (2026.6)", height=400)
+    st.plotly_chart(fig2, use_container_width=True)
+
+st.caption("데이터 파일: 202606_202606_연령별인구현황_월간.xlsx + 국내 체류 외국인 신규 유입·유출 통계(2026년 6월).xlsx")
