@@ -1,208 +1,211 @@
-import os
-import pandas as pd
-import plotly.graph_objects as go
 import streamlit as st
+import pandas as pd
+import plotly.express as px
+import plotly.graph_objects as go
 
-# 페이지 기본 설정
+# ---------------------------------------------------------
+# Page Configuration
+# ---------------------------------------------------------
 st.set_page_config(
-    page_title="지역별 외국인 인구 구조 분석", page_icon="📊", layout="wide"
+    page_title="국내 체류 외국인 통계 대시보드",
+    page_icon="📊",
+    layout="wide"
 )
 
+st.title("📊 국내 체류 외국인 통계 대시보드")
+st.markdown("선택한 지역의 **체류자격별, 국적별, 유입·유출 추이**를 한눈에 확인할 수 있습니다.")
 
-# 인코딩 대응 데이터 로드 함수 (파일 경로 또는 업로드된 파일 객체)
-def load_data(file_source):
-    if file_source is None:
-        return None
-
-    encodings = ["cp949", "euc-kr", "utf-8-sig", "utf-8"]
-    df = None
-
-    for enc in encodings:
-        try:
-            if isinstance(file_source, str):
-                if not os.path.exists(file_source):
-                    continue
-                df = pd.read_csv(file_source, encoding=enc)
-            else:
-                # Streamlit UploadedFile 객체 처리
-                file_source.seek(0)
-                df = pd.read_csv(file_source, encoding=enc)
-            break
-        except Exception:
-            continue
-
-    if df is None:
-        return None
-
-    # 컬럼명 및 기본 문자열 공백 제거
-    df.columns = df.columns.str.strip()
-    for col in ["시도", "시군구", "성별"]:
-        if col in df.columns:
-            df[col] = df[col].astype(str).str.strip()
-
-    # 수치 데이터 정형화 (쉼표 제거 및 숫자 변환)
-    feature_cols = [
-        c for c in df.columns if c not in ["시도", "시군구", "성별"]
-    ]
-    for c in feature_cols:
-        df[c] = (
-            df[c]
-            .astype(str)
-            .str.replace(",", "")
-            .str.replace("nan", "0")
-            .str.strip()
-        )
-        df[c] = pd.to_numeric(df[c], errors="coerce").fillna(0)
-
+# ---------------------------------------------------------
+# Data Loading & Caching
+# ---------------------------------------------------------
+@st.cache_data
+def load_visa_data():
+    """체류자격별 외국인 현황 데이터 로드"""
+    df = pd.read_csv('foreign_nationality_2026.csv', encoding='cp949')
+    numeric_cols = df.columns[3:]
+    for col in numeric_cols:
+        df[col] = df[col].astype(str).str.replace(',', '').apply(pd.to_numeric, errors='coerce').fillna(0)
     return df
 
+@st.cache_data
+def load_nationality_data():
+    """국적별 외국인 현황 데이터 로드"""
+    df = pd.read_csv('foreign_visa_2026.csv', encoding='cp949')
+    numeric_cols = df.columns[3:]
+    for col in numeric_cols:
+        df[col] = df[col].astype(str).str.replace(',', '').apply(pd.to_numeric, errors='coerce').fillna(0)
+    return df
 
-# 메인 타이틀
-st.title("📊 선택 지역별 체류 외국인 인구 구조 분석")
-st.markdown(
-    "원하는 **시도** 및 **시군구**를 선택하여 외국인 인구 구조를 꺾은선 그래프와 상세 데이터로 확인하세요."
+@st.cache_data
+def load_inout_data():
+    """신규 유입/유출/순증감 월별 데이터 파싱"""
+    df_raw = pd.read_csv('foreign_inout_202606.csv', encoding='cp949', header=None)
+    
+    def parse_section(start_idx, end_idx):
+        sub_df = df_raw.iloc[start_idx:end_idx].copy()
+        sub_df = sub_df.dropna(how='all')
+        header = sub_df.iloc[0].values
+        sub_df = sub_df.iloc[1:]
+        sub_df.columns = header
+        
+        # 컬럼명 정리 및 데이터 타입 정제
+        region_col = sub_df.columns[0]
+        sub_df = sub_df.rename(columns={region_col: '시도'})
+        months = ['’26년 2월', '’26년 3월', '’26년 4월', '’26년 5월', '’26년 6월']
+        
+        for m in months:
+            if m in sub_df.columns:
+                sub_df[m] = sub_df[m].astype(str).str.replace(',', '').apply(pd.to_numeric, errors='coerce').fillna(0)
+        return sub_df[['시도'] + [m for m in months if m in sub_df.columns]]
+
+    # 섹션 위치 파싱 (신규유입, 유출, 순증감)
+    df_in = parse_section(6, 25)
+    df_out = parse_section(31, 50)
+    df_net = parse_section(55, 74)
+    
+    return df_in, df_out, df_net
+
+# 데이터 로드
+try:
+    df_visa = load_visa_data()
+    df_nat = load_nationality_data()
+    df_in, df_out, df_net = load_inout_data()
+except Exception as e:
+    st.error(f"데이터 파일을 불러오는 중 오류가 발생했습니다: {e}")
+    st.stop()
+
+# ---------------------------------------------------------
+# Sidebar - Region & Data Category Selection
+# ---------------------------------------------------------
+st.sidebar.header("🔍 검색 및 필터 옵션")
+
+# 시도 선택
+sido_list = sorted([s for s in df_nat['시도'].unique() if s != '총합계'])
+selected_sido = st.sidebar.selectbox("1. 광역지자체(시도) 선택", sido_list)
+
+# 분석 구분 선택
+category = st.sidebar.radio(
+    "2. 분석 구분 선택",
+    ["월별 유입·유출 추이 (꺾은선)", "주요 체류자격별 구조", "주요 국적별 구조"]
 )
 
-# 파일명 매핑
-FILES = {
-    "국적별 인구 구조": "foreign_visa_2026.csv",
-    "체류자격(비자)별 인구 구조": "foreign_nationality_2026.csv",
-}
+st.sidebar.markdown("---")
+st.sidebar.info("💡 **데이터 소스**: 파일내 체류 외국인 통계 데이터")
 
-# 사이드바 설정
-st.sidebar.header("🔍 분석 조건 선택")
+# ---------------------------------------------------------
+# Main Content Display
+# ---------------------------------------------------------
+st.subheader(f"📍 선택 지역: {selected_sido}")
 
-# 1. 분석 관점 선택
-data_category = st.sidebar.radio(
-    "분석 관점 선택", list(FILES.keys()), index=0
-)
-target_filename = FILES[data_category]
-
-# 파일 로드 시도 (로컬/서버 파일 우선, 없으면 업로드 파일 사용)
-df = load_data(target_filename)
-
-if df is None:
-    st.sidebar.warning(f"⚠️ `{target_filename}` 파일을 찾을 수 없습니다.")
-    uploaded_file = st.sidebar.file_uploader(
-        f"`{target_filename}` 파일을 직접 업로드해 주세요", type=["csv"]
-    )
-    if uploaded_file is not None:
-        df = load_data(uploaded_file)
-
-if df is None:
-    st.info(
-        f"👈 왼쪽 사이드바에서 `{target_filename}` CSV 파일을 업로드하거나, "
-        f"GitHub 리포지토리에 파일이 올바르게 올라가 있는지 확인해 주세요."
-    )
-else:
-    # 2. 시/도 선택
-    sido_list = [
-        s
-        for s in df["시도"].unique()
-        if s not in ["총합계", "nan", "None"] and pd.notna(s)
-    ]
-    default_sido_idx = (
-        sido_list.index("서울특별시") if "서울특별시" in sido_list else 0
-    )
-    selected_sido = st.sidebar.selectbox(
-        "시/도 선택", sido_list, index=default_sido_idx
-    )
-
-    # 3. 시/군/구 선택
-    sigungu_df = df[df["시도"] == selected_sido]
-    sigungu_list = [
-        s for s in sigungu_df["시군구"].unique() if s not in ["nan", "None"]
-    ]
-    selected_sigungu = st.sidebar.selectbox("시/군/구 선택", sigungu_list)
-
-    # 4. 성별 선택
-    gender_list = [
-        g for g in sigungu_df["성별"].unique() if g not in ["nan", "None"]
-    ]
-    selected_gender = st.sidebar.selectbox("성별 구분", gender_list)
-
-    # 5. 상위 N개 슬라이더
-    top_n = st.sidebar.slider(
-        "표시할 상위 항목 수 (TOP N)",
-        min_value=5,
-        max_value=50,
-        value=15,
-        step=5,
-    )
-
-    # 데이터 필터링
-    filtered_df = df[
-        (df["시도"] == selected_sido)
-        & (df["시군구"] == selected_sigungu)
-        & (df["성별"] == selected_gender)
-    ]
-
-    if filtered_df.empty:
-        st.warning("⚠️ 선택한 조건에 해당하는 데이터가 존재하지 않습니다.")
-    else:
-        # 수치 항목 정렬
-        exclude_cols = ["시도", "시군구", "성별", "총합계"]
-        metric_cols = [c for c in filtered_df.columns if c not in exclude_cols]
-
-        row_series = filtered_df.iloc[0][metric_cols].astype(float)
-        chart_df = pd.DataFrame(
-            {"구분": row_series.index, "인구수": row_series.values}
-        )
-        chart_df = chart_df.sort_values(
-            by="인구수", ascending=False
-        ).reset_index(drop=True)
-
-        top_chart_df = chart_df.head(top_n)
-
-        # 주요 지표 Card 표시
-        total_pop = filtered_df["총합계"].values[0]
-        st.markdown("---")
-        col1, col2, col3 = st.columns(3)
-        col1.metric("📍 선택 지역", f"{selected_sido} {selected_sigungu}")
-        col2.metric("👥 총 외국인 인구수", f"{int(total_pop):,} 명")
-        if not top_chart_df.empty:
-            col3.metric(
-                f"🏆 최다 {data_category.split()[0]}",
-                f"{top_chart_df.iloc[0]['구분']} ({int(top_chart_df.iloc[0]['인구수']):,}명)",
-            )
-
-        st.markdown("---")
-        st.subheader(
-            f"📈 {selected_sido} {selected_sigungu} [{data_category}] TOP {top_n} 분포"
-        )
-
-        # Plotly 꺾은선 그래프 생성
+if category == "월별 유입·유출 추이 (꺾은선)":
+    st.markdown("### 📈 월별 외국인 유입 / 유출 / 순증감 추이")
+    
+    # 지자체명 매칭 (예: 강원특별자치도 -> 강원, 경기도 -> 경기)
+    short_sido = selected_sido[:2]
+    
+    row_in = df_in[df_in['시도'].str.contains(short_sido, na=False)]
+    row_out = df_out[df_out['시도'].str.contains(short_sido, na=False)]
+    row_net = df_net[df_net['시도'].str.contains(short_sido, na=False)]
+    
+    if not row_in.empty and not row_out.empty and not row_net.empty:
+        months = [c for c in row_in.columns if '26년' in c]
+        val_in = row_in[months].iloc[0].values
+        val_out = row_out[months].iloc[0].values
+        val_net = row_net[months].iloc[0].values
+        
+        # Plotly 꺾은선 그래프 작성
         fig = go.Figure()
-
-        fig.add_trace(
-            go.Scatter(
-                x=top_chart_df["구분"],
-                y=top_chart_df["인구수"],
-                mode="lines+markers+text",
-                name="인구수",
-                text=[f"{int(val):,}" for val in top_chart_df["인구수"]],
-                textposition="top center",
-                line=dict(color="#1f77b4", width=3),
-                marker=dict(size=8, color="#ff7f0e"),
-                hovertemplate="<b>%{x}</b><br>인구수: %{y:,}명<extra></extra>",
-            )
-        )
-
+        fig.add_trace(go.Scatter(x=months, y=val_in, mode='lines+markers+text', name='신규 유입',
+                                 text=val_in, textposition='top center',
+                                 line=dict(color='#2E86C1', width=3)))
+        fig.add_trace(go.Scatter(x=months, y=val_out, mode='lines+markers+text', name='유출',
+                                 text=val_out, textposition='bottom center',
+                                 line=dict(color='#E74C3C', width=3)))
+        fig.add_trace(go.Scatter(x=months, y=val_net, mode='lines+markers+text', name='순증감',
+                                 text=val_net, textposition='top center',
+                                 line=dict(color='#27AE60', width=2, dash='dot')))
+        
         fig.update_layout(
-            xaxis_title=data_category.split()[0],
-            yaxis_title="인구수 (명)",
+            title=f"{selected_sido} 2026년 월별 외국인 유입/유출 추이",
+            xaxis_title="월",
+            yaxis_title="인원 수 (명)",
             hovermode="x unified",
-            height=500,
-            template="plotly_white",
-            xaxis=dict(tickangle=-45),
-            margin=dict(l=40, r=40, t=40, b=80),
+            template="plotly_white"
         )
-
         st.plotly_chart(fig, use_container_width=True)
+        
+        # 요약 데이터 표
+        df_summary = pd.DataFrame({
+            '월': months,
+            '신규 유입': val_in,
+            '유출': val_out,
+            '순증감': val_net
+        })
+        st.dataframe(df_summary.set_index('월'), use_container_width=True)
+    else:
+        st.warning("해당 지역의 월별 유입·유출 데이터가 존재하지 않습니다.")
 
-        # 상세 데이터
-        with st.expander("📋 상세 데이터표 보기"):
-            st.dataframe(
-                top_chart_df.style.format({"인구수": "{:,.0f}"}),
-                use_container_width=True,
-            )
+elif category == "주요 체류자격별 구조":
+    st.markdown("### 📑 체류자격(비자)별 인구 구조")
+    
+    # 선택 시도의 전체 통합 행
+    df_sido_visa = df_visa[(df_visa['시도'] == selected_sido) & (df_visa['시군구'] == '총계') & (df_visa['성별'] == '총계')]
+    
+    if not df_sido_visa.empty:
+        visa_cols = df_visa.columns[4:]
+        visa_data = df_sido_visa[visa_cols].T.reset_index()
+        visa_data.columns = ['체류자격', '인구수']
+        visa_data = visa_data[visa_data['인구수'] > 0].sort_values(by='인구수', ascending=False)
+        
+        col1, col2 = st.columns([6, 4])
+        
+        with col1:
+            # 꺾은선/막대 그래프 전환
+            chart_type = st.radio("그래프 형태 선택", ["꺾은선 그래프", "막대 그래프"], horizontal=True)
+            
+            if chart_type == "꺾은선 그래프":
+                fig = px.line(visa_data.head(15), x='체류자격', y='인구수', markers=True,
+                              title=f"{selected_sido} 상위 체류자격 분포 (꺾은선)",
+                              text='인구수')
+                fig.update_traces(textposition="top center")
+            else:
+                fig = px.bar(visa_data.head(15), x='체류자격', y='인구수', color='인구수',
+                             title=f"{selected_sido} 상위 체류자격 분포 (막대)")
+            
+            fig.update_layout(template="plotly_white")
+            st.plotly_chart(fig, use_container_width=True)
+            
+        with col2:
+            st.markdown("#### 상위 체류자격 순위")
+            st.dataframe(visa_data.reset_index(drop=True), use_container_width=True, height=400)
+    else:
+        st.warning("해당 지역의 체류자격 데이터가 없습니다.")
+
+elif category == "주요 국적별 구조":
+    st.markdown("### 🌐 주요 국적별 인구 구조")
+    
+    df_sido_nat = df_nat[(df_nat['시도'] == selected_sido) & (df_nat['시군구'] == '총계') & (df_nat['성별'] == '총계')]
+    
+    if not df_sido_nat.empty:
+        nat_cols = df_nat.columns[4:]
+        nat_data = df_sido_nat[nat_cols].T.reset_index()
+        nat_data.columns = ['국적', '인구수']
+        nat_data = nat_data[nat_data['인구수'] > 0].sort_values(by='인구수', ascending=False)
+        
+        top_n = st.slider("표시할 상위 국적 개수", min_value=5, max_value=30, value=15)
+        top_nat = nat_data.head(top_n)
+        
+        # Plotly 꺾은선 그래프
+        fig = px.line(top_nat, x='국적', y='인구수', markers=True,
+                      title=f"{selected_sido} 상위 {top_n}개 국적 분포",
+                      text='인구수')
+        fig.update_traces(textposition="top center", line_color="#2E86C1", line_width=2)
+        fig.update_layout(template="plotly_white", xaxis_tickangle=-45)
+        
+        st.plotly_chart(fig, use_container_width=True)
+        
+        # 세부 표
+        st.markdown("#### 전체 국적별 상세 인구수")
+        st.dataframe(nat_data.reset_index(drop=True), use_container_width=True)
+    else:
+        st.warning("해당 지역의 국적별 데이터가 없습니다.")
