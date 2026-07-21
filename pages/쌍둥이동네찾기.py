@@ -2,7 +2,7 @@ import streamlit as st
 import pandas as pd
 import plotly.graph_objects as go
 from plotly.subplots import make_subplots
-from sklearn.metrics.pairwise import cosine_similarity
+import numpy as np
 
 st.set_page_config(page_title="쌍둥이동네 찾기", layout="wide")
 st.title("🧬 인구 구조가 가장 비슷한 '쌍둥이동네' TOP5")
@@ -33,22 +33,32 @@ else:
 selected = st.selectbox("기준 지역 선택", options)
 
 idx = df[df['행정기관'] == selected].index[0]
-sim = cosine_similarity([age_vectors[idx]], age_vectors)[0]
+selected_vec = age_vectors[idx]
 
-top5 = pd.DataFrame({'지역': regions, '유사도': sim}).sort_values('유사도', ascending=False)[1:6]
+# 유사도 계산 (코사인 유사도 수동 구현)
+norms = np.linalg.norm(age_vectors, axis=1)
+selected_norm = np.linalg.norm(selected_vec)
+sim = np.dot(age_vectors, selected_vec) / (norms * selected_norm + 1e-8)
+
+top5 = pd.DataFrame({
+    '지역': regions,
+    '유사도': sim
+}).sort_values('유사도', ascending=False)[1:6].reset_index(drop=True)
 
 st.subheader(f"**{selected}** 와 가장 비슷한 지역 TOP5")
 st.dataframe(top5.style.format({'유사도': '{:.4f}'}), use_container_width=True)
 
-# 그래프
-fig = go.Figure()
-fig.add_trace(go.Scatter(x=age_cols, y=age_vectors[idx], name=selected, line=dict(width=4)))
+# 그래**✅ 지금 바로 해결하세요**
 
-colors = ['red','green','orange','purple','brown']
-for i, r in top5.iterrows():
-    r_idx = df[df['행정기관'] == r['지역']].index[0]
-    fig.add_trace(go.Scatter(x=age_cols, y=age_vectors[r_idx], name=r['지역'], 
-                            line=dict(color=colors[i], dash='dash')))
+**오류 원인**: `scikit-learn` 패키지가 아직 설치되지 않았습니다.
 
-fig.update_layout(title="인구 구조 비교", xaxis_title="연령", yaxis_title="인구수", height=700, hovermode="x unified")
-st.plotly_chart(fig, use_container_width=True)
+### 정확한 해결 단계
+
+1. **requirements.txt** 파일을 열고 **아래 내용으로 완전히 교체**하세요:
+
+```txt
+streamlit
+pandas
+plotly
+openpyxl
+scikit-learn
