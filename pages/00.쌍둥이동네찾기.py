@@ -9,7 +9,7 @@ st.title("🧬 인구 구조가 가장 비슷한 '쌍둥이동네' TOP5")
 
 @st.cache_data
 def load_data():
-    df = pd.read_excel("202606_202606_연령별인구현황_월간.xlsx", 
+    df = pd.read_excel("foreign_inout_202606.xlsx", 
                        sheet_name="연령별인구현황", header=3)
     
     # 숫자 변환
