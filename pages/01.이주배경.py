@@ -1,6 +1,10 @@
-# config.py
-
+import sys
 from pathlib import Path
+
+ROOT = Path(__file__).resolve().parent.parent
+
+if str(ROOT) not in sys.path:
+    sys.path.append(str(ROOT))
 
 APP_TITLE = "국내 체류 외국인 신규 유입·유출 통계"
 
