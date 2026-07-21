@@ -3,5 +3,8 @@ pandas
 plotly
 openpyxl
 scikit-learn
+streamlit
+pandas
 plotly
 openpyxl
+numpy
