@@ -3,6 +3,7 @@ import pandas as pd
 import plotly.express as px
 import os
 
+# 페이지 기본 설정
 st.set_page_config(
     page_title="외국인 인구 현황 및 이동 분석",
     page_icon="🌏",
@@ -10,7 +11,7 @@ st.set_page_config(
 )
 
 # ----------------------------------------------------
-# 데이터 파일명 정의 (정확한 파일명 사용)
+# 9개 파일명 매핑
 # ----------------------------------------------------
 FILES = {
     "지역_유입": "지역별 외국인 신규 유입 현황.csv",
@@ -25,87 +26,101 @@ FILES = {
 }
 
 # ----------------------------------------------------
-# 헬퍼 함수: 데이터 로드 및 한글 인코딩 자동처리
+# 안전한 CSV 로드 함수 (한글 인코딩 자동 감지)
 # ----------------------------------------------------
 def read_csv_safe(file_path):
     if not os.path.exists(file_path):
         return None
-    for enc in ['euc-kr', 'cp949', 'utf-8']:
+    for enc in ['euc-kr', 'cp949', 'utf-8-sig', 'utf-8']:
         try:
             return pd.read_csv(file_path, encoding=enc, header=None)
         except Exception:
             continue
     return None
 
+# ----------------------------------------------------
+# 월별 데이터 파싱 함수 (오류 수정 완료)
+# ----------------------------------------------------
 @st.cache_data
 def load_region_monthly_data(file_path):
-    """지역별 월별 데이터 전처리 (신규유입, 유출, 순증감)"""
     df = read_csv_safe(file_path)
     if df is None:
         return None
 
-    # '월' 위치 찾기
+    # '월' 키워드가 포함된 행 찾기
     month_idx = None
     for idx, row in df.iterrows():
-        if row.astype(str).str.contains('월').any():
+        row_str = row.astype(str).tolist()
+        if any('월' in cell for cell in row_str):
             month_idx = idx
             break
 
     if month_idx is None:
         return None
 
-    # 월 및 데이터 추출
-    months = [str(x).strip() for x in df.iloc[month_idx, 1:].values if pd.notna(x)]
+    # 월 항목 추출 ('월'이라는 셀 자체와 NaN 제외)
+    month_row = df.iloc[month_idx].tolist()
+    months = []
+    month_col_indices = []
+
+    for col_i, val in enumerate(month_row):
+        val_str = str(val).strip()
+        if pd.notna(val) and val_str not in ['월', 'nan', '전월 대비', '전월대비', '']:
+            months.append(val_str)
+            month_col_indices.append(col_i)
+
+    if not months:
+        return None
+
+    # 지역별 데이터 추출
     rows = []
-    
     for idx in range(month_idx + 1, len(df)):
-        region = df.iloc[idx, 0]
-        if pd.notna(region) and str(region).strip() not in ['시도', '합계', '(단위: 명)', 'nan']:
-            vals = df.iloc[idx, 1:len(months)+1].values
-            rows.append([str(region).strip()] + list(vals))
+        region = str(df.iloc[idx, 0]).strip()
+        if region not in ['시도', '합계', '(단위: 명)', 'nan', 'None', '']:
+            vals = [df.iloc[idx, col_i] for col_i in month_col_indices]
+            rows.append([region] + vals)
 
-    cols = ['지역'] + months[:len(rows[0])-1] if rows else ['지역']
-    clean_df = pd.DataFrame(rows, columns=cols)
+    if not rows:
+        return None
 
-    # 전월대비 컬럼 제외하고 숫자 컬럼 변환
-    num_cols = [c for c in clean_df.columns if c not in ['지역', '전월 대비', '전월대비']]
-    for c in num_cols:
+    clean_df = pd.DataFrame(rows, columns=['지역'] + months)
+
+    # 수치형 전처리 (쉼표 및 공백 제거)
+    for c in months:
         clean_df[c] = clean_df[c].astype(str).str.replace(',', '').str.strip()
         clean_df[c] = pd.to_numeric(clean_df[c], errors='coerce').fillna(0)
 
     # Unpivot (Melt)
-    melted = clean_df.melt(id_vars=['지역'], value_vars=num_cols, var_name='월', value_name='인원수')
+    melted = clean_df.melt(id_vars=['지역'], value_vars=months, var_name='월', value_name='인원수')
     return melted
 
+# ----------------------------------------------------
+# 국적/비자별 데이터 파싱 함수
+# ----------------------------------------------------
 @st.cache_data
 def load_demographics_data(file_path):
-    """foreign_nationality_2026.csv 또는 foreign_visa_2026.csv 전처리"""
     if not os.path.exists(file_path):
         return None
-    for enc in ['euc-kr', 'cp949', 'utf-8']:
+    for enc in ['euc-kr', 'cp949', 'utf-8-sig', 'utf-8']:
         try:
-            df = pd.read_csv(file_path, encoding=enc)
-            return df
+            return pd.read_csv(file_path, encoding=enc)
         except Exception:
             continue
     return None
 
 # ----------------------------------------------------
-# UI 구성
+# UI 구성 및 메인 로직
 # ----------------------------------------------------
-st.title("📊 외국인 인구 구조 및 이동 현황 분석 대시보드")
+st.title("📊 외국인 인구 현황 및 이동 분석 대시보드")
 st.markdown("선택한 지역의 외국인 인구 구조 및 월별 유입·유출 추이를 한눈에 확인합니다.")
 
-# 사이드바 분석 카테고리 선택
 menu = st.sidebar.selectbox(
     "📌 분석 항목 선택",
     ["1. 지역별 월별 유입/유출 추이 (꺾은선 그래프)",
      "2. 지역별 외국인 세부 현황 (국적/체류자격)"]
 )
 
-# ----------------------------------------------------
-# 1. 지역별 월별 유입/유출 추이 (꺾은선 그래프)
-# ----------------------------------------------------
+# 1. 꺾은선 그래프 메뉴
 if menu.startswith("1"):
     st.subheader("📈 지역별 월별 외국인 유입 · 유출 · 순증감 추이")
 
@@ -127,7 +142,6 @@ if menu.startswith("1"):
     if data_df is not None:
         all_regions = sorted(data_df['지역'].unique().tolist())
         
-        # 기본 선택 지역
         default_regions = [r for r in ['서울특별시', '경기도', '인천광역시', '강원특별자치도'] if r in all_regions]
         if not default_regions:
             default_regions = all_regions[:3]
@@ -141,7 +155,6 @@ if menu.startswith("1"):
         if selected_regions:
             filtered_df = data_df[data_df['지역'].isin(selected_regions)]
 
-            # Plotly 꺾은선 그래프 작성
             fig = px.line(
                 filtered_df,
                 x='월',
@@ -169,11 +182,9 @@ if menu.startswith("1"):
         else:
             st.info("지역을 하나 이상 선택해 주세요.")
     else:
-        st.error(f"파일을 읽을 수 없습니다: {selected_file}")
+        st.error(f"파일을 읽을 수 없습니다: `{selected_file}`. 파일이 같은 폴더에 있는지 확인해주세요.")
 
-# ----------------------------------------------------
-# 2. 지역별 외국인 세부 현황 (국적/체류자격)
-# ----------------------------------------------------
+# 2. 세부 현황 메뉴
 else:
     st.subheader("🏛️ 지역별 외국인 인구 세부 구조 분석")
 
@@ -183,7 +194,6 @@ else:
     df_demo = load_demographics_data(target_file)
 
     if df_demo is not None:
-        # 데이터 정제 (총계 제외)
         df_clean = df_demo[(df_demo['시도'] != '총합계') & (df_demo['시군구'] == '총계')].copy()
         
         sido_list = sorted(df_clean['시도'].unique().tolist())
@@ -191,7 +201,6 @@ else:
 
         sido_data = df_clean[df_clean['시도'] == selected_sido]
 
-        # 숫자형 변환 및 상위 항목 추출
         val_cols = [c for c in df_clean.columns if c not in ['시도', '시군구', '성별', '총합계']]
         
         row_values = {}
@@ -219,4 +228,4 @@ else:
         st.plotly_chart(fig_bar, use_container_width=True)
 
     else:
-        st.error(f"파일을 읽을 수 없습니다: {target_file}")
+        st.error(f"파일을 읽을 수 없습니다: `{target_file}`. 파일이 같은 폴더에 있는지 확인해주세요.")
