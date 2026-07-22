@@ -4,11 +4,11 @@ import plotly.express as px
 import os
 
 # ----------------------------------------------------
-# 페이지 설정
+# 페이지 기본 설정
 # ----------------------------------------------------
 st.set_page_config(
-    page_title="외국인 인구 현황 및 이동 분석 대시보드",
-    page_icon="🌏",
+    page_title="국내체류외국인현황 분석",
+    page_icon="📊",
     layout="wide"
 )
 
@@ -28,23 +28,23 @@ EXACT_FILES = {
 }
 
 # ----------------------------------------------------
-# 위치 불일치 대비: 파일 탐색 함수
+# 안전한 파일 경로 찾기 (pages 폴더 및 상위 루트 폴더 전체 탐색)
 # ----------------------------------------------------
 def find_file_path(filename):
-    """현재 디렉토리 및 모든 경로에서 해당 파일의 실재 경로 탐색"""
-    # 1. 현재 경로에서 먼저 확인
+    # 1. 현재 폴더 확인
     if os.path.exists(filename):
         return filename
     
-    # 2. 현재 폴더 및 하위 폴더 재귀적 탐색
-    for root, dirs, files in os.walk('.'):
+    # 2. 상위 루트 및 모든 서브 폴더 검색
+    search_root = os.path.abspath(os.path.join(os.getcwd(), "..")) if 'pages' in os.getcwd() else os.getcwd()
+    
+    for root, dirs, files in os.walk(search_root):
         for f in files:
             if f.strip() == filename.strip() or filename.strip() in f:
                 return os.path.join(root, f)
     return None
 
 def read_csv_safe(file_path):
-    """한글 인코딩 순차 시도"""
     if not file_path or not os.path.exists(file_path):
         return None
     for enc in ['euc-kr', 'cp949', 'utf-8-sig', 'utf-8']:
@@ -55,22 +55,22 @@ def read_csv_safe(file_path):
     return None
 
 # ----------------------------------------------------
-# 월별 데이터 파싱 (지역별 유입/유출/순증감)
+# 월별 데이터 파싱 (예외 처리 완료)
 # ----------------------------------------------------
 @st.cache_data
 def load_region_monthly_data(target_filename):
     real_path = find_file_path(target_filename)
     if not real_path:
-        return None, f"파일을 찾을 수 없습니다: `{target_filename}`"
+        return None, f"파일을 찾을 수 없습니다: `{target_filename}` (루트 폴더에 CSV 파일이 있는지 확인해 주세요)"
 
     df = read_csv_safe(real_path)
     if df is None:
         return None, f"파일을 읽을 수 없습니다: `{real_path}`"
 
-    # '월' 위치 탐색
+    # '월' 위치 안전 탐색 (str 강제 변환으로 에러 예방)
     month_idx = None
     for idx, row in df.iterrows():
-        row_str = row.astype(str).tolist()
+        row_str = [str(cell) for cell in row.values]
         if any('월' in cell for cell in row_str):
             month_idx = idx
             break
@@ -102,7 +102,7 @@ def load_region_monthly_data(target_filename):
 
     clean_df = pd.DataFrame(rows, columns=['지역'] + months)
 
-    # 전처리
+    # 수치형 데이터 정제
     for c in months:
         clean_df[c] = clean_df[c].astype(str).str.replace(',', '').str.strip()
         clean_df[c] = pd.to_numeric(clean_df[c], errors='coerce').fillna(0)
@@ -130,7 +130,7 @@ def load_demographics_data(target_filename):
 # ----------------------------------------------------
 # 대시보드 UI
 # ----------------------------------------------------
-st.title("📊 외국인 인구 현황 및 이동 분석 대시보드")
+st.title("📊 국내 체류 외국인 현황 분석")
 st.markdown("선택한 지역의 외국인 인구 구조 및 월별 유입·유출 추이를 한눈에 확인합니다.")
 
 menu = st.sidebar.selectbox(
